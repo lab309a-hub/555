@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>五子棋遊戲</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #f3f4f6;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            user-select: none; /* 防止反白文字 */
+        }
+
+        .board-container {
+            background-color: #d18b47; /* 木頭顏色背景 */
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            position: relative;
+        }
+
+        #board {
+            display: grid;
+            grid-template-columns: repeat(15, 1fr);
+            grid-template-rows: repeat(15, 1fr);
+            width: 90vw;
+            max-width: 600px;
+            height: 90vw;
+            max-height: 600px;
+            background-color: #e6b981; /* 棋盤底色 */
+            border: 2px solid #5a3c1c;
+            position: relative;
+            cursor: pointer;
+        }
+
+        /* 繪製棋盤線條 */
+        .cell {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .cell::before, .cell::after {
+            content: '';
+            position: absolute;
+            background-color: #5a3c1c;
+            z-index: 1;
+        }
+
+        /* 橫線 */
+        .cell::before {
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            transform: translateY(-50%);
+        }
+
+        /* 直線 */
+        .cell::after {
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            transform: translateX(-50%);
+        }
+        
+        /* 邊界處理：隱藏邊緣多餘的線條 */
+        .cell[data-row="0"]::after { top: 50%; }
+        .cell[data-row="14"]::after { bottom: 50%; }
+        .cell[data-col="0"]::before { left: 50%; }
+        .cell[data-col="14"]::before { right: 50%; }
+
+        /* 棋子樣式 */
+        .piece {
+            width: 80%;
+            height: 80%;
+            border-radius: 50%;
+            z-index: 10;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.4);
+            transition: transform 0.2s;
+        }
+        
+        .piece.black {
+            background: radial-gradient(circle at 30% 30%, #666, #000);
+        }
+
+        .piece.white {
+            background: radial-gradient(circle at 30% 30%, #fff, #ccc);
+        }
+
+        /* 游標懸停預覽棋子 (僅限空位) */
+        .cell:not(:has(.piece)):hover::after {
+            /* 這裡使用一個偽元素來顯示半透明的預覽 */
+            content: '';
+            position: absolute;
+            width: 80%;
+            height: 80%;
+            border-radius: 50%;
+            z-index: 5;
+            opacity: 0.3;
+        }
+        
+        body[data-turn="black"] .cell:not(:has(.piece)):hover::after {
+            background-color: black;
+        }
+        
+        body[data-turn="white"] .cell:not(:has(.piece)):hover::after {
+            background-color: white;
+        }
+        
+        /* 天元和星位標記 */
+        .star-point {
+            position: absolute;
+            width: 20%;
+            height: 20%;
+            background-color: #5a3c1c;
+            border-radius: 50%;
+            z-index: 2;
+        }
+
+        /* 聽牌提示標記 */
+        .threat-marker {
+            position: absolute;
+            width: 40%;
+            height: 40%;
+            border-radius: 50%;
+            z-index: 8;
+            animation: pulse 1.5s infinite;
+            pointer-events: none; /* 讓點擊事件可以穿透提示標記，點到格子 */
+        }
+
+        .threat-marker.black-threat {
+            background-color: rgba(0, 0, 0, 0.4);
+            border: 2px solid rgba(0, 0, 0, 0.8);
+        }
+
+        .threat-marker.white-threat {
+            background-color: rgba(255, 255, 255, 0.4);
+            border: 2px solid rgba(255, 255, 255, 0.8);
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.8); opacity: 0.5; }
+        }
+        
+        /* 勝負訊息遮罩 */
+        #message-overlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.9);
+            z-index: 20;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-radius: 8px;
+        }
+
+    </style>
+</head>
+<body data-turn="black" class="text-gray-800">
+
+    <div class="mb-6 text-center">
+        <h1 class="text-4xl font-bold mb-2 text-gray-800">五子棋</h1>
+        
+        <div class="flex items-center justify-center gap-3 mb-4">
+            <label for="game-mode" class="font-medium text-gray-700 text-sm">模式：</label>
+            <select id="game-mode" class="px-3 py-1.5 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-800 font-semibold cursor-pointer transition-shadow">
+                <option value="pvp">玩家 vs 玩家</option>
+                <option value="pve-white">玩家 (黑) vs 電腦 (白)</option>
+                <option value="pve-black">電腦 (黑) vs 玩家 (白)</option>
+            </select>
+        </div>
+
+        <div class="flex items-center justify-center gap-4 text-xl font-semibold">
+            <span id="turn-indicator" class="flex items-center gap-2">
+                <div id="turn-color" class="w-6 h-6 rounded-full bg-black shadow-md border border-gray-400"></div>
+                <span id="turn-text">黑子回合</span>
+            </span>
+        </div>
+    </div>
+
+    <!-- 棋盤容器 -->
+    <div class="board-container">
+        <div id="board"></div>
+        
+        <!-- 遊戲結束時顯示的訊息疊加層 -->
+        <div id="message-overlay">
+            <h2 id="winner-text" class="text-3xl font-bold mb-4 text-gray-900">黑子獲勝！</h2>
+            <button id="restart-btn-overlay" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors shadow-md">
+                再玩一局
+            </button>
+        </div>
+    </div>
+
+    <div class="mt-8 flex gap-4">
+        <button id="restart-btn" class="px-6 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold rounded-lg transition-colors shadow-sm">
+            重新開始
+        </button>
+        <button id="undo-btn" class="px-6 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold rounded-lg transition-colors shadow-sm opacity-50 cursor-not-allowed" disabled>
+            悔棋
+        </button>
+        <button id="toggle-threats-btn" class="px-6 py-2 bg-blue-100 hover:bg-blue-200 text-blue-800 font-semibold rounded-lg transition-colors shadow-sm">
+            顯示/隱藏聽牌
+        </button>
+    </div>
+
+    <script>
+        const BOARD_SIZE = 15;
+        const EMPTY = 0;
+        const BLACK = 1;
+        const WHITE = 2;
+        
+        let board = [];
+        let currentPlayer = BLACK;
+        let gameActive = true;
+        let moveHistory = []; // 用於悔棋功能
+        let showThreats = true; // 是否顯示聽牌提示
+        let gameMode = 'pvp'; // 遊戲模式：pvp, pve-white, pve-black
+        let isThinking = false; // 電腦是否正在思考
+
+        // DOM 元素
+        const boardElement = document.getElementById('board');
+        const turnText = document.getElementById('turn-text');
+        const turnColor = document.getElementById('turn-color');
+        const body = document.body;
+        const messageOverlay = document.getElementById('message-overlay');
+        const winnerText = document.getElementById('winner-text');
+        const restartBtn = document.getElementById('restart-btn');
+        const restartBtnOverlay = document.getElementById('restart-btn-overlay');
+        const undoBtn = document.getElementById('undo-btn');
+        const toggleThreatsBtn = document.getElementById('toggle-threats-btn');
+        const gameModeSelect = document.getElementById('game-mode');
+
+        // 定義星位 (天元及四個角) 的座標 [row, col]
+        const starPoints = [
+            [7, 7], [3, 3], [3, 11], [11, 3], [11, 11]
+        ];
+
+        function initGame() {
+            // 重置變數
+            board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(EMPTY));
+            currentPlayer = BLACK;
+            gameActive = true;
+            moveHistory = [];
+            gameMode = gameModeSelect.value;
+            isThinking = false;
+            
+            // 清空 UI
+            boardElement.innerHTML = '';
+            messageOverlay.style.display = 'none';
+            updateTurnIndicator();
+            updateUndoButton();
+
+            // 建立棋盤格子
+            for (let row = 0; row < BOARD_SIZE; row++) {
+                for (let col = 0; col < BOARD_SIZE; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.dataset.row = row;
+                    cell.dataset.col = col;
+                    
+                    // 添加星位標記
+                    if (isStarPoint(row, col)) {
+                        const star = document.createElement('div');
+                        star.className = 'star-point';
+                        cell.appendChild(star);
+                    }
+                    
+                    // 綁定點擊事件
+                    cell.addEventListener('click', handleCellClick);
+                    
+                    boardElement.appendChild(cell);
+                }
+            }
+
+            // 如果是電腦執黑，讓電腦先下
+            if (gameMode === 'pve-black' && currentPlayer === BLACK) {
+                isThinking = true;
+                setTimeout(makeAIMove, 100); // 稍微延遲讓畫面先渲染
+            }
+        }
+
+        // 判斷是否為星位
+        function isStarPoint(row, col) {
+            return starPoints.some(point => point[0] === row && point[1] === col);
+        }
+
+        function handleCellClick(event) {
+            // 如果遊戲結束或電腦正在思考，禁止玩家點擊
+            if (!gameActive || isThinking) return;
+
+            // 確保點擊到的是 cell 本身或是其子元素
+            let cell = event.target;
+            if (!cell.classList.contains('cell')) {
+                cell = cell.closest('.cell');
+            }
+            if (!cell) return;
+
+            const row = parseInt(cell.dataset.row);
+            const col = parseInt(cell.dataset.col);
+
+            // 如果該位置已經有棋子，則無效
+            if (board[row][col] !== EMPTY) return;
+
+            // 執行下棋動作
+            performMove(row, col);
+        }
+
+        // 執行下棋邏輯 (由玩家或電腦呼叫)
+        function performMove(row, col) {
+            // 記錄這步棋
+            moveHistory.push({ row, col, player: currentPlayer });
+            
+            // 更新邏輯棋盤
+            board[row][col] = currentPlayer;
+
+            // 在 UI 放置棋子
+            const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+            placePiece(cell, currentPlayer);
+
+            // 檢查是否獲勝
+            if (checkWin(row, col, currentPlayer)) {
+                endGame(currentPlayer);
+                return;
+            }
+
+            // 檢查是否平局 (棋盤滿了)
+            if (moveHistory.length === BOARD_SIZE * BOARD_SIZE) {
+                endGame(EMPTY);
+                return;
+            }
+
+            // 切換玩家
+            currentPlayer = currentPlayer === BLACK ? WHITE : BLACK;
+            updateTurnIndicator();
+            updateUndoButton();
+            
+            if (showThreats) {
+                updateThreatMarkers();
+            }
+
+            // 檢查是否輪到電腦下棋
+            if (gameActive) {
+                if ((gameMode === 'pve-white' && currentPlayer === WHITE) ||
+                    (gameMode === 'pve-black' && currentPlayer === BLACK)) {
+                    makeAIMove();
+                }
+            }
+        }
+
+        function placePiece(cell, player) {
+            const piece = document.createElement('div');
+            piece.className = `piece ${player === BLACK ? 'black' : 'white'}`;
+            
+            // 加入落子動畫效果
+            piece.style.transform = 'scale(0)';
+            cell.appendChild(piece);
+            
+            // 強制重繪以觸發動畫
+            void piece.offsetWidth; 
+            piece.style.transform = 'scale(1)';
+        }
+
+        function checkWin(row, col, player) {
+            // 定義四個方向：水平、垂直、左上到右下、右上到左下
+            // 每個方向是一個 [dx, dy] 陣列
+            const directions = [
+                [0, 1],  // 水平 (左右)
+                [1, 0],  // 垂直 (上下)
+                [1, 1],  // 對角線 \
+                [1, -1]  // 對角線 /
+            ];
+
+            for (const [dx, dy] of directions) {
+                let count = 1; // 包含剛下的這顆子
+
+                // 往一個方向檢查
+                count += countPieces(row, col, dx, dy, player);
+                // 往反方向檢查
+                count += countPieces(row, col, -dx, -dy, player);
+
+                if (count >= 5) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // 輔助函數：計算某個方向上連續相同顏色棋子的數量
+        function countPieces(startRow, startCol, dx, dy, player) {
+            let count = 0;
+            let r = startRow + dx;
+            let c = startCol + dy;
+
+            while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === player) {
+                count++;
+                r += dx;
+                c += dy;
+            }
+            return count;
+        }
+
+        function endGame(winner) {
+            gameActive = false;
+            if (winner === BLACK) {
+                winnerText.textContent = "黑子獲勝！";
+                winnerText.className = "text-3xl font-bold mb-4 text-black";
+            } else if (winner === WHITE) {
+                winnerText.textContent = "白子獲勝！";
+                winnerText.className = "text-3xl font-bold mb-4 text-gray-600";
+            } else {
+                winnerText.textContent = "平手！";
+                winnerText.className = "text-3xl font-bold mb-4 text-gray-800";
+            }
+            messageOverlay.style.display = 'flex';
+            updateUndoButton(); // 遊戲結束不能悔棋
+        }
+
+        function updateTurnIndicator() {
+            if (currentPlayer === BLACK) {
+                turnText.textContent = "黑子回合";
+                turnColor.className = "w-6 h-6 rounded-full bg-black shadow-md border border-gray-400";
+                body.dataset.turn = "black";
+            } else {
+                turnText.textContent = "白子回合";
+                turnColor.className = "w-6 h-6 rounded-full bg-white shadow-md border border-gray-400";
+                body.dataset.turn = "white";
+            }
+        }
+        
+        function updateUndoButton() {
+            if (moveHistory.length > 0 && gameActive) {
+                undoBtn.disabled = false;
+                undoBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            } else {
+                undoBtn.disabled = true;
+                undoBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        // 尋找聽牌位置 (只差一步就贏的位置)
+        function findThreats(player) {
+            const threats = [];
+            
+            // 遍歷所有空位
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (board[r][c] === EMPTY) {
+                        // 假設在這邊下一顆子，看看會不會贏
+                        if (checkWin(r, c, player)) {
+                            threats.push({row: r, col: c});
+                        }
+                    }
+                }
+            }
+            return threats;
+        }
+
+        // 更新畫面上的聽牌標記
+        function updateThreatMarkers() {
+            // 先清除所有現有的標記
+            document.querySelectorAll('.threat-marker').forEach(el => el.remove());
+
+            if (!gameActive || !showThreats) return;
+
+            // 尋找黑方和白方的聽牌位置
+            const blackThreats = findThreats(BLACK);
+            const whiteThreats = findThreats(WHITE);
+
+            // 標記黑方聽牌
+            blackThreats.forEach(pos => {
+                const cell = document.querySelector(`.cell[data-row="${pos.row}"][data-col="${pos.col}"]`);
+                if (cell) {
+                    const marker = document.createElement('div');
+                    marker.className = 'threat-marker black-threat';
+                    cell.appendChild(marker);
+                }
+            });
+
+            // 標記白方聽牌
+            whiteThreats.forEach(pos => {
+                // 如果同一個位置黑白雙方都聽牌，視覺上可能會重疊，這裡簡單處理，讓白方的在上面
+                const cell = document.querySelector(`.cell[data-row="${pos.row}"][data-col="${pos.col}"]`);
+                if (cell) {
+                    const marker = document.createElement('div');
+                    marker.className = 'threat-marker white-threat';
+                    cell.appendChild(marker);
+                }
+            });
+        }
+
+        // 切換顯示/隱藏聽牌
+        function toggleThreats() {
+            showThreats = !showThreats;
+            if (showThreats) {
+                toggleThreatsBtn.classList.remove('bg-gray-200', 'text-gray-800');
+                toggleThreatsBtn.classList.add('bg-blue-100', 'text-blue-800');
+                updateThreatMarkers();
+            } else {
+                toggleThreatsBtn.classList.add('bg-gray-200', 'text-gray-800');
+                toggleThreatsBtn.classList.remove('bg-blue-100', 'text-blue-800');
+                updateThreatMarkers(); // 呼叫更新，會因為 showThreats 是 false 而清除所有標記
+            }
+        }
+
+        // 悔棋功能
+        function undoMove() {
+            if (moveHistory.length === 0 || !gameActive || isThinking) return;
+
+            // 判斷要退幾步（如果是對戰電腦，且目前輪到玩家，需退兩步）
+            let stepsToUndo = 1;
+            if (gameMode !== 'pvp') {
+                const humanPlayer = gameMode === 'pve-white' ? BLACK : WHITE;
+                if (currentPlayer === humanPlayer) {
+                    if (moveHistory.length < 2) return; // 避免電腦剛下第一手就無法退回
+                    stepsToUndo = 2;
+                }
+            }
+
+            for (let i = 0; i < stepsToUndo; i++) {
+                // 取得上一步
+                const lastMove = moveHistory.pop();
+                
+                // 清除邏輯棋盤上的記錄
+                board[lastMove.row][lastMove.col] = EMPTY;
+                
+                // 清除 UI 上的棋子
+                const cell = document.querySelector(`.cell[data-row="${lastMove.row}"][data-col="${lastMove.col}"]`);
+                const piece = cell.querySelector('.piece');
+                if (piece) {
+                    cell.removeChild(piece);
+                }
+                
+                // 切換回上一位玩家
+                currentPlayer = lastMove.player;
+            }
+
+            updateTurnIndicator();
+            updateUndoButton();
+            
+            if (showThreats) {
+                updateThreatMarkers();
+            }
+        }
+
+        // 取得單個方向上的評分
+        function getDirectionScore(r, c, dx, dy, player) {
+            let count = 1; // 包含剛下的這顆子
+            let block = 0;
+
+            // 正向檢查
+            let i = 1;
+            while (true) {
+                let nr = r + dx * i;
+                let nc = c + dy * i;
+                if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) { block++; break; }
+                if (board[nr][nc] === player) { count++; }
+                else if (board[nr][nc] === EMPTY) { break; }
+                else { block++; break; }
+                i++;
+            }
+
+            // 反向檢查
+            i = 1;
+            while (true) {
+                let nr = r - dx * i;
+                let nc = c - dy * i;
+                if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) { block++; break; }
+                if (board[nr][nc] === player) { count++; }
+                else if (board[nr][nc] === EMPTY) { break; }
+                else { block++; break; }
+                i++;
+            }
+
+            // 根據連子數量和被阻擋的次數給予分數 (權重設定)
+            if (count >= 5) return 1000000;
+            if (count === 4) {
+                if (block === 0) return 100000; // 活四
+                if (block === 1) return 10000;  // 衝四 (被擋一面)
+            }
+            if (count === 3) {
+                if (block === 0) return 10000;  // 活三
+                if (block === 1) return 1000;   // 眠三
+            }
+            if (count === 2) {
+                if (block === 0) return 1000;   // 活二
+                if (block === 1) return 100;    // 眠二
+            }
+            if (count === 1) {
+                if (block === 0) return 10;
+                if (block === 1) return 1;
+            }
+            return 0;
+        }
+
+        // 取得該點對於特定玩家的綜合分數 (評估四個方向)
+        function getPointScore(r, c, player) {
+            let score = 0;
+            score += getDirectionScore(r, c, 1, 0, player);
+            score += getDirectionScore(r, c, 0, 1, player);
+            score += getDirectionScore(r, c, 1, 1, player);
+            score += getDirectionScore(r, c, 1, -1, player);
+            return score;
+        }
+
+        // AI 執行下棋
+        function makeAIMove() {
+            if (!gameActive) return;
+            
+            isThinking = true;
+            
+            // 延遲一點點時間，讓 UI 先更新 (例如顯示輪到誰)，也模擬思考時間
+            setTimeout(() => {
+                let bestScore = -1;
+                let bestMoves = [];
+                const aiPlayer = currentPlayer;
+                const opponent = aiPlayer === BLACK ? WHITE : BLACK;
+
+                // 處理開局：第一步直接下天元 (如果電腦是黑子且是第一步)
+                if (moveHistory.length === 0) {
+                    performMove(7, 7);
+                    isThinking = false;
+                    return;
+                }
+
+                // 遍歷所有空位，計算每個位置的分數
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        if (board[r][c] === EMPTY) {
+                            let attackScore = getPointScore(r, c, aiPlayer);
+                            let defenseScore = getPointScore(r, c, opponent);
+
+                            // 處理極端情況：能贏就立刻贏，必須擋就立刻擋
+                            if (attackScore >= 1000000) attackScore += 5000000;
+                            if (defenseScore >= 1000000) defenseScore += 4000000;
+
+                            // 總分 = 攻擊分數 + 防禦分數 (給予防守稍微高一點的權重，避免AI漏看危機)
+                            let totalScore = attackScore + (defenseScore * 1.1);
+
+                            if (totalScore > bestScore) {
+                                bestScore = totalScore;
+                                bestMoves = [{row: r, col: c}];
+                            } else if (totalScore === bestScore) {
+                                bestMoves.push({row: r, col: c});
+                            }
+                        }
+                    }
+                }
+
+                // 從最高分的候選位置中隨機挑選一個 (增加一點變數，不讓電腦每次走法完全一樣)
+                if (bestMoves.length > 0) {
+                    let chosenMove = bestMoves[Math.floor(Math.random() * bestMoves.length)];
+                    performMove(chosenMove.row, chosenMove.col);
+                }
+                
+                isThinking = false;
+            }, 350); // 350 毫秒延遲
+        }
+
+        // 綁定按鈕事件
+        restartBtn.addEventListener('click', initGame);
+        restartBtnOverlay.addEventListener('click', initGame);
+        undoBtn.addEventListener('click', undoMove);
+        toggleThreatsBtn.addEventListener('click', toggleThreats);
+        gameModeSelect.addEventListener('change', initGame);
+
+        // 啟動遊戲
+        initGame();
+
+    </script>
+</body>
+</html>
